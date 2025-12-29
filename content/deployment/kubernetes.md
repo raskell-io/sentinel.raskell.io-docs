@@ -356,15 +356,18 @@ spec:
 ### Installation
 
 ```bash
-# Add Sentinel Helm repo
-helm repo add sentinel https://sentinel.raskell.io/charts
-helm repo update
+# Clone the repository
+git clone https://github.com/raskell-io/sentinel.git
+cd sentinel
 
 # Install with default values
-helm install sentinel sentinel/sentinel
+helm install sentinel ./deploy/helm/sentinel
 
 # Install with custom values
-helm install sentinel sentinel/sentinel -f values.yaml
+helm install sentinel ./deploy/helm/sentinel -f values.yaml
+
+# Or install directly from GitHub (OCI registry coming soon)
+helm install sentinel oci://ghcr.io/raskell-io/charts/sentinel --version 0.1.3
 ```
 
 ### values.yaml
