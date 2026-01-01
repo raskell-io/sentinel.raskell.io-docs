@@ -353,74 +353,119 @@ spec:
 
 ## Helm Chart
 
+The official Helm chart provides the easiest way to deploy Sentinel on Kubernetes with production-ready defaults.
+
+**Repository:** [github.com/raskell-io/sentinel-helm](https://github.com/raskell-io/sentinel-helm)
+
 ### Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/raskell-io/sentinel.git
-cd sentinel
-
-# Install with default values
-helm install sentinel ./deploy/helm/sentinel
+# Install from source
+git clone https://github.com/raskell-io/sentinel-helm.git
+cd sentinel-helm
+helm install sentinel .
 
 # Install with custom values
-helm install sentinel ./deploy/helm/sentinel -f values.yaml
+helm install sentinel . -f my-values.yaml
 
-# Or install directly from GitHub (OCI registry coming soon)
-helm install sentinel oci://ghcr.io/raskell-io/charts/sentinel --version 0.1.3
+# Upgrade
+helm upgrade sentinel . -f my-values.yaml
 ```
 
-### values.yaml
+### Quick Start
 
 ```yaml
 # values.yaml
-replicaCount: 3
-
-image:
-  repository: ghcr.io/raskell-io/sentinel
-  tag: latest
-  pullPolicy: IfNotPresent
-
-service:
-  type: LoadBalancer
-  httpPort: 80
-  httpsPort: 443
-  adminPort: 9090
+replicaCount: 2
 
 config:
-  sentinel.kdl: |
-    server {
-        listen "0.0.0.0:8080"
+  raw: |
+    listeners {
+        listener "http" {
+            address "0.0.0.0:80"
+            protocol "http"
+        }
     }
-    # ... rest of config
 
-agents:
-  auth:
-    enabled: true
-    image: ghcr.io/raskell-io/sentinel-auth:latest
-    type: sidecar
-    transport: socket
-    resources:
-      requests:
-        cpu: "50m"
-        memory: "64Mi"
+    routes {
+        route "api" {
+            matches { path-prefix "/api" }
+            upstream "backend"
+        }
+    }
 
-  waf:
-    enabled: true
-    image: ghcr.io/raskell-io/sentinel-waf:latest
-    type: service
-    replicas: 3
-    transport: grpc
-    resources:
-      requests:
-        cpu: "200m"
-        memory: "256Mi"
-    autoscaling:
-      enabled: true
-      minReplicas: 2
-      maxReplicas: 10
-      targetCPUUtilization: 70
+    upstreams {
+        upstream "backend" {
+            target "my-service:8080"
+            health-check { path "/health" }
+        }
+    }
+```
 
+### Production Example
+
+```yaml
+# production-values.yaml
+replicaCount: 3
+
+config:
+  raw: |
+    listeners {
+        listener "https" {
+            address "0.0.0.0:443"
+            protocol "https"
+            tls {
+                cert "/etc/sentinel/certs/tls.crt"
+                key "/etc/sentinel/certs/tls.key"
+            }
+        }
+    }
+
+    routes {
+        route "api" {
+            matches { path-prefix "/" }
+            upstream "backend"
+        }
+    }
+
+    upstreams {
+        upstream "backend" {
+            target "api-service.default.svc.cluster.local:80"
+            load-balancing "round_robin"
+            health-check {
+                path "/health"
+                interval-secs 10
+            }
+        }
+    }
+
+# Resources
+resources:
+  requests:
+    cpu: "200m"
+    memory: "256Mi"
+  limits:
+    cpu: "2000m"
+    memory: "1Gi"
+
+# Autoscaling
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+# High availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+# Prometheus monitoring
+serviceMonitor:
+  enabled: true
+  interval: 15s
+
+# Ingress
 ingress:
   enabled: true
   className: nginx
@@ -436,26 +481,43 @@ ingress:
       hosts:
         - api.example.com
 
-resources:
-  requests:
-    cpu: "100m"
-    memory: "128Mi"
-  limits:
-    cpu: "1000m"
-    memory: "512Mi"
+# TLS certificates
+extraVolumes:
+  - name: tls-certs
+    secret:
+      secretName: sentinel-tls
 
-nodeSelector: {}
-tolerations: []
-affinity: {}
-
-podDisruptionBudget:
-  enabled: true
-  minAvailable: 2
-
-serviceMonitor:
-  enabled: true
-  interval: 15s
+extraVolumeMounts:
+  - name: tls-certs
+    mountPath: /etc/sentinel/certs
+    readOnly: true
 ```
+
+### Using an Existing ConfigMap
+
+If you manage configuration separately:
+
+```yaml
+config:
+  existingConfigMap: my-sentinel-config
+  configKey: sentinel.kdl
+```
+
+### Chart Features
+
+| Feature | Description |
+|---------|-------------|
+| **Secure defaults** | Non-root user (65534), read-only filesystem, no privilege escalation |
+| **ConfigMap** | Inline KDL config or reference existing ConfigMap |
+| **HPA** | Horizontal Pod Autoscaler for automatic scaling |
+| **PDB** | Pod Disruption Budget for high availability |
+| **ServiceMonitor** | Prometheus Operator integration |
+| **Ingress** | Optional ingress with TLS support |
+| **Extra volumes** | Mount TLS certs, secrets, etc. |
+
+### All Configuration Options
+
+See the [values.yaml](https://github.com/raskell-io/sentinel-helm/blob/main/values.yaml) for all available options.
 
 ## Service Mesh Integration
 
