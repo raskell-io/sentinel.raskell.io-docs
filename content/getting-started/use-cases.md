@@ -3,46 +3,75 @@ title = "Use Cases"
 weight = 5
 +++
 
-Sentinel is designed for teams who need a secure, high-performance reverse proxy with programmable security controls. Here are common scenarios where Sentinel excels.
+Sentinel is a secure, high-performance reverse proxy with programmable security controls. Whether you're running services at home or in production, here are common scenarios where Sentinel excels.
 
-## API Gateway
+## Homelab & Self-Hosted Services
 
-Protect and manage your APIs with authentication, rate limiting, and request validation.
+Run a single proxy in front of all your self-hosted services with automatic HTTPS and subdomain routing.
 
 ```kdl
-routes {
-    route "api" {
-        matches {
-            path-prefix "/api/v1"
+listeners {
+    listener "https" {
+        address "0.0.0.0:443"
+        protocol "https"
+        tls {
+            cert "/etc/sentinel/certs/wildcard.crt"
+            key "/etc/sentinel/certs/wildcard.key"
         }
-        upstream "api-backend"
-        filters "auth-filter" "rate-limit-filter"
     }
 }
 
-agents {
-    agent "auth" type="auth" {
-        unix-socket "/var/run/sentinel/auth.sock"
-        config {
-            jwt-secret "${JWT_SECRET}"
-            required-claims "sub" "exp"
+routes {
+    route "jellyfin" {
+        matches {
+            host "jellyfin.home.lan"
         }
+        upstream "jellyfin"
     }
 
-    agent "ratelimit" type="ratelimit" {
-        unix-socket "/var/run/sentinel/ratelimit.sock"
-        config {
-            requests-per-minute 100
-            burst 20
+    route "nextcloud" {
+        matches {
+            host "cloud.home.lan"
         }
+        upstream "nextcloud"
+    }
+
+    route "homeassistant" {
+        matches {
+            host "ha.home.lan"
+        }
+        upstream "homeassistant"
+    }
+
+    route "grafana" {
+        matches {
+            host "grafana.home.lan"
+        }
+        upstream "grafana"
+    }
+}
+
+upstreams {
+    upstream "jellyfin" {
+        target "192.168.1.10:8096"
+    }
+    upstream "nextcloud" {
+        target "192.168.1.11:80"
+    }
+    upstream "homeassistant" {
+        target "192.168.1.12:8123"
+    }
+    upstream "grafana" {
+        target "192.168.1.13:3000"
     }
 }
 ```
 
 **Benefits:**
-- Centralized authentication across all API endpoints
-- Per-client rate limiting to prevent abuse
-- Request/response transformation capabilities
+- Single entry point for all your services
+- TLS termination with your own certs or Let's Encrypt
+- Low memory footprint (~50MB) - runs great on a Raspberry Pi
+- No complex YAML or templating - just readable KDL config
 
 ## Web Application Firewall
 
@@ -80,40 +109,48 @@ agents {
 - Configurable paranoia levels for different environments
 - Native Rust regex engine for high performance
 
-## AI/LLM Gateway
+## Static Site + API
 
-Secure AI API traffic with prompt injection detection, PII filtering, and usage controls.
+Serve static files with automatic compression while proxying API requests to backends.
 
 ```kdl
 routes {
-    route "ai" {
+    route "static" {
+        priority "high"
         matches {
-            path-prefix "/v1/chat"
+            path-regex "\\.(html|css|js|png|jpg|svg|woff2?)$"
         }
-        upstream "openai-api"
-        filters "ai-gateway-filter"
+        service-type "static" {
+            root "/var/www/html"
+            compression true
+            cache-control "public, max-age=86400"
+        }
     }
-}
 
-agents {
-    agent "ai-gateway" type="ai-gateway" {
-        unix-socket "/var/run/sentinel/ai-gateway.sock"
-        events "request_headers" "request_body"
-        config {
-            detect-prompt-injection true
-            detect-pii true
-            allowed-models "gpt-4" "gpt-3.5-turbo"
-            max-tokens 4096
-            rate-limit-tokens 100000
+    route "api" {
+        matches {
+            path-prefix "/api"
+        }
+        upstream "api-backend"
+    }
+
+    route "spa-fallback" {
+        priority "low"
+        matches {
+            path-prefix "/"
+        }
+        service-type "static" {
+            root "/var/www/html"
+            fallback "/index.html"
         }
     }
 }
 ```
 
 **Benefits:**
-- Prevent prompt injection and jailbreak attempts
-- Detect and redact PII before it reaches the LLM
-- Enforce model allowlists and token budgets
+- Serve static assets with optimal caching
+- SPA fallback for client-side routing
+- No need for separate static file server
 
 ## Microservices Ingress
 
@@ -162,48 +199,79 @@ upstreams {
 - Automatic health checks and failover
 - Consistent TLS termination and observability
 
-## Static Site + API
+## API Gateway
 
-Serve static files with automatic compression while proxying API requests to backends.
+Protect and manage your APIs with authentication, rate limiting, and request validation.
 
 ```kdl
 routes {
-    route "static" {
-        priority "high"
-        matches {
-            path-regex "\\.(html|css|js|png|jpg|svg|woff2?)$"
-        }
-        service-type "static" {
-            root "/var/www/html"
-            compression true
-            cache-control "public, max-age=86400"
-        }
-    }
-
     route "api" {
         matches {
-            path-prefix "/api"
+            path-prefix "/api/v1"
         }
         upstream "api-backend"
+        filters "auth-filter" "rate-limit-filter"
+    }
+}
+
+agents {
+    agent "auth" type="auth" {
+        unix-socket "/var/run/sentinel/auth.sock"
+        config {
+            jwt-secret "${JWT_SECRET}"
+            required-claims "sub" "exp"
+        }
     }
 
-    route "spa-fallback" {
-        priority "low"
-        matches {
-            path-prefix "/"
-        }
-        service-type "static" {
-            root "/var/www/html"
-            fallback "/index.html"
+    agent "ratelimit" type="ratelimit" {
+        unix-socket "/var/run/sentinel/ratelimit.sock"
+        config {
+            requests-per-minute 100
+            burst 20
         }
     }
 }
 ```
 
 **Benefits:**
-- Serve static assets with optimal caching
-- SPA fallback for client-side routing
-- No need for separate static file server
+- Centralized authentication across all API endpoints
+- Per-client rate limiting to prevent abuse
+- Request/response transformation capabilities
+
+## AI/LLM Gateway
+
+Secure AI API traffic with prompt injection detection, PII filtering, and usage controls.
+
+```kdl
+routes {
+    route "ai" {
+        matches {
+            path-prefix "/v1/chat"
+        }
+        upstream "openai-api"
+        filters "ai-gateway-filter"
+    }
+}
+
+agents {
+    agent "ai-gateway" type="ai-gateway" {
+        unix-socket "/var/run/sentinel/ai-gateway.sock"
+        events "request_headers" "request_body"
+        config {
+            detect-prompt-injection true
+            detect-pii true
+            allowed-models "gpt-4" "gpt-3.5-turbo"
+            max-tokens 4096
+            rate-limit-tokens 100000
+        }
+    }
+}
+```
+
+**Benefits:**
+- Prevent prompt injection and jailbreak attempts
+- Detect and redact PII before it reaches the LLM
+- Enforce model allowlists and token budgets
 
 ## Zero-Trust Security
 
@@ -309,8 +377,9 @@ function onResponse(request, response) {
 
 | Use Case | Recommended Agents |
 |----------|-------------------|
-| API Protection | auth, ratelimit, waf |
+| Homelab | (none needed - just routing) |
 | Web Application | waf, denylist |
+| API Protection | auth, ratelimit, waf |
 | AI/LLM APIs | ai-gateway, ratelimit |
 | Microservices | auth, ratelimit |
 | Custom Logic | js, lua, wasm |
