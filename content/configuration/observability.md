@@ -305,7 +305,14 @@ scrape_configs:
 
 ## Distributed Tracing
 
-OpenTelemetry-compatible distributed tracing:
+Sentinel provides OpenTelemetry-compatible distributed tracing for end-to-end visibility across your services. Traces show the complete request journey through the proxy, including agent processing and upstream calls.
+
+> **Note**: Tracing requires building Sentinel with the `opentelemetry` feature flag:
+> ```bash
+> cargo build --release --features opentelemetry
+> ```
+
+### Basic Configuration
 
 ```kdl
 observability {
@@ -313,7 +320,7 @@ observability {
         backend "otlp" {
             endpoint "http://jaeger:4317"
         }
-        sampling-rate 0.01     // 1% of requests
+        sampling-rate 0.1      // 10% of requests
         service-name "sentinel"
     }
 }
@@ -321,17 +328,21 @@ observability {
 
 ### Tracing Backends
 
-#### OTLP (OpenTelemetry Protocol)
+#### OTLP (OpenTelemetry Protocol) - Recommended
+
+The OpenTelemetry Protocol (OTLP) is the standard for sending telemetry data. Use this with Jaeger, Tempo, or any OTLP-compatible backend:
 
 ```kdl
 tracing {
     backend "otlp" {
-        endpoint "http://otel-collector:4317"
+        endpoint "http://otel-collector:4317"  // gRPC endpoint
     }
+    sampling-rate 0.1
+    service-name "sentinel-prod"
 }
 ```
 
-#### Jaeger
+#### Jaeger (Direct)
 
 ```kdl
 tracing {
@@ -355,31 +366,171 @@ tracing {
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `sampling-rate` | `0.01` | Fraction of requests to trace (0.0-1.0) |
-| `service-name` | `sentinel` | Service name in traces |
+| `sampling-rate` | `0.01` | Fraction of requests to trace (0.0 to 1.0) |
+| `service-name` | `sentinel` | Service name shown in trace UI |
 
-### Trace Context
+#### Sampling Rate Guidelines
 
-Sentinel propagates W3C Trace Context headers:
+| Environment | Recommended Rate | Notes |
+|-------------|------------------|-------|
+| Development | `1.0` | Trace all requests |
+| Staging | `0.1` - `0.5` | 10-50% sampling |
+| Production (low traffic) | `0.05` - `0.1` | 5-10% sampling |
+| Production (high traffic) | `0.01` - `0.05` | 1-5% sampling |
 
-| Header | Description |
-|--------|-------------|
-| `traceparent` | W3C trace context parent |
-| `tracestate` | W3C trace context state |
-| `X-Request-ID` | Sentinel's trace ID |
+### Trace Propagation
+
+#### W3C Trace Context (Standard)
+
+Sentinel implements [W3C Trace Context](https://www.w3.org/TR/trace-context/) for distributed tracing propagation:
+
+| Header | Format | Description |
+|--------|--------|-------------|
+| `traceparent` | `{version}-{trace-id}-{parent-id}-{flags}` | Trace context parent |
+| `tracestate` | Vendor-specific key-value pairs | Trace context state |
+
+Example `traceparent` header:
+```
+00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
+│   │                                │                  │
+│   │                                │                  └─ Flags (01 = sampled)
+│   │                                └─ Parent Span ID (16 hex chars)
+│   └─ Trace ID (32 hex chars)
+└─ Version (00)
+```
+
+#### Upstream Propagation
+
+When proxying to upstream services, Sentinel:
+1. Parses incoming `traceparent` header (if present)
+2. Creates a child span for the request
+3. Propagates `traceparent` with the new span ID to upstream
+
+This enables end-to-end tracing across your service mesh.
+
+#### Agent Propagation
+
+Agents receive the `traceparent` in the `RequestMetadata`:
+
+```json
+{
+  "metadata": {
+    "correlation_id": "2Kj8mNpQ3xR",
+    "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    ...
+  }
+}
+```
+
+Agents can use this to create child spans for their processing, enabling visibility into agent latency in your traces.
+
+### Request Span Lifecycle
+
+Each request creates a span with the following lifecycle:
+
+1. **Start**: Span created when request headers are received
+2. **Upstream**: `traceparent` propagated to upstream service
+3. **Response**: Status code recorded on span
+4. **End**: Span completed when response is sent to client
 
 ### Span Attributes
 
-Each request span includes:
+Each request span includes semantic convention attributes:
 
 | Attribute | Description |
 |-----------|-------------|
-| `http.method` | HTTP method |
-| `http.url` | Request URL |
-| `http.status_code` | Response status |
-| `http.route` | Route ID |
-| `sentinel.upstream` | Upstream name |
-| `sentinel.cache_status` | Cache hit/miss |
+| `http.method` | HTTP method (GET, POST, etc.) |
+| `http.target` | Request path |
+| `http.status_code` | Response status code |
+| `service.name` | Configured service name |
+
+### Testing with Jaeger
+
+Quick start with Jaeger all-in-one:
+
+```bash
+# Start Jaeger
+docker run -d --name jaeger \
+  -p 4317:4317 \
+  -p 16686:16686 \
+  jaegertracing/all-in-one:latest
+
+# Run Sentinel with tracing
+cargo run --features opentelemetry -- --config sentinel.kdl
+
+# View traces
+open http://localhost:16686
+```
+
+### Testing with Grafana Tempo
+
+For production-grade tracing with Grafana:
+
+```yaml
+# docker-compose.yml
+services:
+  tempo:
+    image: grafana/tempo:latest
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo.yaml:/etc/tempo.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "3200:3200"   # Tempo API
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+```
+
+Configure Sentinel:
+```kdl
+tracing {
+    backend "otlp" {
+        endpoint "http://tempo:4317"
+    }
+    sampling-rate 0.1
+    service-name "sentinel"
+}
+```
+
+### Connecting Logs and Traces
+
+Include trace IDs in access logs for log-to-trace correlation:
+
+```kdl
+observability {
+    logging {
+        access-log {
+            enabled #true
+            format "json"
+            include-trace-id #true  // Adds trace_id to log entries
+        }
+    }
+    tracing {
+        backend "otlp" { endpoint "http://tempo:4317" }
+        sampling-rate 0.1
+        service-name "sentinel"
+    }
+}
+```
+
+Log entries will include the trace ID:
+```json
+{
+  "timestamp": "2024-01-15T10:30:45.123Z",
+  "trace_id": "0af7651916cd43dd8448eb211c80319c",
+  "method": "GET",
+  "path": "/api/users",
+  "status": 200
+}
+```
+
+In Grafana, you can then jump from logs to traces using the trace ID.
 
 ## Trace ID Format
 

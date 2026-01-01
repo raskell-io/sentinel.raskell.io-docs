@@ -57,6 +57,7 @@ message RequestMetadata {
   optional string route_id = 9;       // Matched route ID
   optional string upstream_id = 10;   // Target upstream
   string timestamp = 11;          // RFC3339 timestamp
+  optional string traceparent = 12;   // W3C Trace Context header
 }
 
 // ============================================================================
@@ -293,7 +294,8 @@ For Unix socket transport, messages use JSON with the following schema:
     "tls_cipher": "string|null",
     "route_id": "string|null",
     "upstream_id": "string|null",
-    "timestamp": "2025-12-29T08:00:00Z"
+    "timestamp": "2025-12-29T08:00:00Z",
+    "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01|null"
   },
   "method": "GET|POST|...",
   "uri": "/path?query",
@@ -302,6 +304,8 @@ For Unix socket transport, messages use JSON with the following schema:
   }
 }
 ```
+
+> **Note**: The `traceparent` field contains the W3C Trace Context header when distributed tracing is enabled. Agents can use this to create child spans for their processing. Format: `{version}-{trace-id}-{span-id}-{flags}`.
 
 **RequestBodyChunkEvent:**
 

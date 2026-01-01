@@ -1,6 +1,6 @@
 +++
 title = "WebSocket"
-weight = 8
+weight = 10
 +++
 
 WebSocket proxying with frame inspection, security controls, and real-time monitoring.
