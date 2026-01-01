@@ -33,7 +33,8 @@ show_theme_toggle = true
 
 # Version picker
 [extra.versions]
-current = "25.12"
+current = "26.01"
 list = [
-    { version = "25.12", url = "/", label = "latest" },
+    { version = "26.01", url = "/", label = "latest" },
+    { version = "25.12", url = "/v/25.12/", label = "" },
 ]
