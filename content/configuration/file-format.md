@@ -125,11 +125,59 @@ observability {
 }
 ```
 
+## Schema Versioning
+
+Sentinel configurations include a schema version for compatibility checking. This helps catch configuration issues when upgrading Sentinel.
+
+```kdl
+// Declare schema version at the top of your config
+schema-version "1.0"
+
+server {
+    // ...
+}
+```
+
+### Version Format
+
+Schema versions use `major.minor` format:
+
+| Version | Meaning |
+|---------|---------|
+| `1.0` | Initial stable schema |
+| `1.1` | Minor additions (backward compatible) |
+| `2.0` | Major changes (may require migration) |
+
+### Compatibility Behavior
+
+| Config Version vs Sentinel | Result |
+|---------------------------|--------|
+| Exact match | ✓ Loads normally |
+| Config older but supported | ✓ Loads normally |
+| Config newer than Sentinel | ⚠ Loads with warning (some features may not work) |
+| Config older than minimum | ✗ Rejected with error |
+| Invalid format | ✗ Rejected with error |
+
+### Omitting Version
+
+If `schema-version` is not specified, Sentinel assumes the current version. For production deployments, explicitly specifying the version is recommended:
+
+```kdl
+// Explicit version (recommended for production)
+schema-version "1.0"
+
+server { /* ... */ }
+```
+
+This ensures configuration files remain compatible when upgrading Sentinel, and provides clear error messages if migration is needed.
+
 ## Complete Example
 
 ```kdl
 // Sentinel Configuration
 // Production API Gateway
+
+schema-version "1.0"
 
 server {
     worker-threads 0          // 0 = auto-detect CPU cores
