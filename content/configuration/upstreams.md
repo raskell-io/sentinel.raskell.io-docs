@@ -170,7 +170,74 @@ upstream "backend" {
 }
 ```
 
-Dynamically adjusts routing based on observed response times and error rates.
+Dynamically adjusts routing based on observed response times and error rates. The adaptive balancer continuously learns from request outcomes and automatically routes traffic away from slow or failing backends.
+
+#### How It Works
+
+1. **Weight Adjustment**: Each target starts with its configured weight. The balancer adjusts effective weights based on performance:
+   - Targets with high error rates have their weights reduced
+   - Targets with high latency have their weights reduced
+   - Healthy, fast targets recover their weights over time
+
+2. **EWMA Smoothing**: Error rates and latencies use Exponentially Weighted Moving Averages to smooth out transient spikes and focus on sustained trends.
+
+3. **Circuit Breaker Integration**: Targets with consecutive failures are temporarily removed from rotation, then gradually reintroduced.
+
+4. **Latency Feedback**: Every request reports its latency back to the balancer, enabling real-time performance awareness.
+
+#### Selection Algorithm
+
+For each request, the adaptive balancer:
+1. Calculates a score for each healthy target: `score = weight / (1 + connections + error_penalty + latency_penalty)`
+2. Uses weighted random selection based on scores
+3. Targets with better performance get proportionally more traffic
+
+#### Default Thresholds
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Error threshold | 5% | Error rate that triggers weight penalty |
+| Latency threshold | 500ms | p99 latency that triggers penalty |
+| Min weight ratio | 10% | Minimum weight (fraction of original) |
+| Max weight ratio | 200% | Maximum weight (fraction of original) |
+| Adjustment interval | 10s | How often weights are recalculated |
+| Min requests | 100 | Minimum requests before adjusting |
+
+#### When to Use Adaptive
+
+**Best for:**
+- Heterogeneous backends with varying performance
+- Services with unpredictable load patterns
+- Environments where backend health fluctuates
+- Gradual degradation scenarios
+
+**Consider alternatives when:**
+- All backends have identical performance (use `round_robin`)
+- Session affinity is required (use `ip_hash` or `consistent_hash`)
+- You need deterministic routing (use `weighted`)
+
+#### Example: API with Variable Backend Performance
+
+```kdl
+upstream "api" {
+    targets {
+        target { address "api-1.internal:8080" weight=100 }
+        target { address "api-2.internal:8080" weight=100 }
+        target { address "api-3.internal:8080" weight=100 }
+    }
+    load-balancing "adaptive"
+    health-check {
+        type "http" {
+            path "/health"
+            expected-status 200
+        }
+        interval-secs 5
+        unhealthy-threshold 3
+    }
+}
+```
+
+If `api-2` starts responding slowly, traffic automatically shifts to `api-1` and `api-3`. When `api-2` recovers, it gradually receives more traffic again.
 
 ## Health Checks
 
@@ -220,7 +287,7 @@ Simple TCP connection check. Use for non-HTTP services.
 upstream "grpc-service" {
     health-check {
         type "grpc" {
-            service "grpc.health.v1.Health"
+            service "my.service.Name"
         }
         interval-secs 10
         timeout-secs 5
@@ -228,7 +295,56 @@ upstream "grpc-service" {
 }
 ```
 
-Uses the gRPC Health Checking Protocol.
+Uses the standard [gRPC Health Checking Protocol](https://grpc.io/docs/guides/health-checking/) (`grpc.health.v1.Health`).
+
+#### Service Name
+
+The `service` field specifies which service to check:
+- **Empty string `""`**: Checks overall server health
+- **Service name**: Checks health of a specific service (e.g., `"my.package.MyService"`)
+
+```kdl
+// Check overall server health
+type "grpc" {
+    service ""
+}
+
+// Check specific service
+type "grpc" {
+    service "myapp.UserService"
+}
+```
+
+#### Response Handling
+
+| Status | Result |
+|--------|--------|
+| `SERVING` | Healthy |
+| `NOT_SERVING` | Unhealthy |
+| `UNKNOWN` | Unhealthy |
+| `SERVICE_UNKNOWN` | Unhealthy |
+| Connection failure | Unhealthy |
+
+#### Example: gRPC Microservices
+
+```kdl
+upstream "user-service" {
+    targets {
+        target { address "user-svc-1.internal:50051" }
+        target { address "user-svc-2.internal:50051" }
+    }
+    load-balancing "least_connections"
+    health-check {
+        type "grpc" {
+            service "user.UserService"
+        }
+        interval-secs 5
+        timeout-secs 3
+        healthy-threshold 2
+        unhealthy-threshold 2
+    }
+}
+```
 
 ### Health Check Behavior
 
