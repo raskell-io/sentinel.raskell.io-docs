@@ -3,11 +3,11 @@ title = "Use Cases"
 weight = 5
 +++
 
-Sentinel is a secure, high-performance reverse proxy with programmable security controls. Whether you're running services at home or in production, here are common scenarios where Sentinel excels.
+Sentinel is a secure, high-performance reverse proxy with programmable security controls. Here are common scenarios where Sentinel excels, from enterprise deployments to personal projects.
 
-## Homelab & Self-Hosted Services
+## Reverse Proxy & Load Balancer
 
-Run a single proxy in front of all your self-hosted services with automatic HTTPS and subdomain routing.
+The most fundamental use case: distribute traffic across multiple backend servers with health checking and failover.
 
 ```kdl
 listeners {
@@ -15,146 +15,86 @@ listeners {
         address "0.0.0.0:443"
         protocol "https"
         tls {
-            cert "/etc/sentinel/certs/wildcard.crt"
-            key "/etc/sentinel/certs/wildcard.key"
+            cert "/etc/sentinel/certs/server.crt"
+            key "/etc/sentinel/certs/server.key"
         }
     }
 }
 
 routes {
-    route "jellyfin" {
+    route "app" {
         matches {
-            host "jellyfin.home.lan"
+            path-prefix "/"
         }
-        upstream "jellyfin"
-    }
-
-    route "nextcloud" {
-        matches {
-            host "cloud.home.lan"
-        }
-        upstream "nextcloud"
-    }
-
-    route "homeassistant" {
-        matches {
-            host "ha.home.lan"
-        }
-        upstream "homeassistant"
-    }
-
-    route "grafana" {
-        matches {
-            host "grafana.home.lan"
-        }
-        upstream "grafana"
+        upstream "app-servers"
     }
 }
 
 upstreams {
-    upstream "jellyfin" {
-        target "192.168.1.10:8096"
-    }
-    upstream "nextcloud" {
-        target "192.168.1.11:80"
-    }
-    upstream "homeassistant" {
-        target "192.168.1.12:8123"
-    }
-    upstream "grafana" {
-        target "192.168.1.13:3000"
+    upstream "app-servers" {
+        target "app-1:8080" weight=1
+        target "app-2:8080" weight=1
+        target "app-3:8080" weight=1
+        load-balancing "round_robin"
+        health-check {
+            path "/health"
+            interval-secs 10
+            timeout-secs 5
+            healthy-threshold 2
+            unhealthy-threshold 3
+        }
     }
 }
 ```
 
 **Benefits:**
-- Single entry point for all your services
-- TLS termination with your own certs or Let's Encrypt
-- Low memory footprint (~50MB) - runs great on a Raspberry Pi
-- No complex YAML or templating - just readable KDL config
+- TLS termination at the edge
+- Automatic failover when backends go down
+- Multiple load balancing algorithms (round robin, least connections, consistent hashing)
+- Built-in metrics and observability
 
-## Web Application Firewall
+## API Gateway
 
-Protect web applications from OWASP Top 10 attacks including SQL injection, XSS, and path traversal.
+Protect and manage your APIs with authentication, rate limiting, and request validation.
 
 ```kdl
 routes {
-    route "web" {
+    route "api" {
         matches {
-            path-prefix "/"
+            path-prefix "/api/v1"
         }
-        upstream "web-backend"
-        filters "waf-filter"
+        upstream "api-backend"
+        filters "auth-filter" "rate-limit-filter"
     }
 }
 
 agents {
-    agent "waf" type="waf" {
-        unix-socket "/var/run/sentinel/waf.sock"
-        events "request_headers" "request_body"
+    agent "auth" type="auth" {
+        unix-socket "/var/run/sentinel/auth.sock"
         config {
-            paranoia-level 2
-            sqli true
-            xss true
-            path-traversal true
-            block-mode true
-            exclude-paths "/health" "/metrics"
+            jwt-secret "${JWT_SECRET}"
+            required-claims "sub" "exp"
+        }
+    }
+
+    agent "ratelimit" type="ratelimit" {
+        unix-socket "/var/run/sentinel/ratelimit.sock"
+        config {
+            requests-per-minute 100
+            burst 20
         }
     }
 }
 ```
 
 **Benefits:**
-- Block attacks before they reach your application
-- Configurable paranoia levels for different environments
-- Native Rust regex engine for high performance
-
-## Static Site + API
-
-Serve static files with automatic compression while proxying API requests to backends.
-
-```kdl
-routes {
-    route "static" {
-        priority "high"
-        matches {
-            path-regex "\\.(html|css|js|png|jpg|svg|woff2?)$"
-        }
-        service-type "static" {
-            root "/var/www/html"
-            compression true
-            cache-control "public, max-age=86400"
-        }
-    }
-
-    route "api" {
-        matches {
-            path-prefix "/api"
-        }
-        upstream "api-backend"
-    }
-
-    route "spa-fallback" {
-        priority "low"
-        matches {
-            path-prefix "/"
-        }
-        service-type "static" {
-            root "/var/www/html"
-            fallback "/index.html"
-        }
-    }
-}
-```
-
-**Benefits:**
-- Serve static assets with optimal caching
-- SPA fallback for client-side routing
-- No need for separate static file server
+- Centralized authentication across all API endpoints
+- Per-client rate limiting to prevent abuse
+- Request/response transformation capabilities
 
 ## Microservices Ingress
 
-Route traffic to multiple backend services with load balancing and health checks.
+Route traffic to multiple backend services based on path, host, or headers.
 
 ```kdl
 routes {
@@ -199,44 +139,41 @@ upstreams {
 - Automatic health checks and failover
 - Consistent TLS termination and observability
 
-## API Gateway
+## Web Application Firewall
 
-Protect and manage your APIs with authentication, rate limiting, and request validation.
+Protect web applications from OWASP Top 10 attacks including SQL injection, XSS, and path traversal.
 
 ```kdl
 routes {
-    route "api" {
+    route "web" {
         matches {
-            path-prefix "/api/v1"
+            path-prefix "/"
         }
-        upstream "api-backend"
-        filters "auth-filter" "rate-limit-filter"
+        upstream "web-backend"
+        filters "waf-filter"
     }
 }
 
 agents {
-    agent "auth" type="auth" {
-        unix-socket "/var/run/sentinel/auth.sock"
+    agent "waf" type="waf" {
+        unix-socket "/var/run/sentinel/waf.sock"
+        events "request_headers" "request_body"
         config {
-            jwt-secret "${JWT_SECRET}"
-            required-claims "sub" "exp"
-        }
-    }
-
-    agent "ratelimit" type="ratelimit" {
-        unix-socket "/var/run/sentinel/ratelimit.sock"
-        config {
-            requests-per-minute 100
-            burst 20
+            paranoia-level 2
+            sqli true
+            xss true
+            path-traversal true
+            block-mode true
+            exclude-paths "/health" "/metrics"
         }
     }
 }
 ```
 
 **Benefits:**
-- Centralized authentication across all API endpoints
-- Per-client rate limiting to prevent abuse
-- Request/response transformation capabilities
+- Block attacks before they reach your application
+- Configurable paranoia levels for different environments
+- Native Rust regex engine for high performance
 
 ## AI/LLM Gateway
 
@@ -272,6 +209,49 @@ agents {
 - Prevent prompt injection and jailbreak attempts
 - Detect and redact PII before it reaches the LLM
 - Enforce model allowlists and token budgets
+
+## Static Site + API
+
+Serve static files with automatic compression while proxying API requests to backends.
+
+```kdl
+routes {
+    route "static" {
+        priority "high"
+        matches {
+            path-regex "\\.(html|css|js|png|jpg|svg|woff2?)$"
+        }
+        service-type "static" {
+            root "/var/www/html"
+            compression true
+            cache-control "public, max-age=86400"
+        }
+    }
+
+    route "api" {
+        matches {
+            path-prefix "/api"
+        }
+        upstream "api-backend"
+    }
+
+    route "spa-fallback" {
+        priority "low"
+        matches {
+            path-prefix "/"
+        }
+        service-type "static" {
+            root "/var/www/html"
+            fallback "/index.html"
+        }
+    }
+}
+```
+
+**Benefits:**
+- Serve static assets with optimal caching
+- SPA fallback for client-side routing
+- No need for separate static file server
 
 ## Zero-Trust Security
 
@@ -373,17 +353,70 @@ function onResponse(request, response) {
 - Access to request/response data
 - Hot-reload without proxy restart
 
+## Homelab & Self-Hosted Services
+
+Run a single proxy in front of all your self-hosted services with subdomain routing.
+
+```kdl
+listeners {
+    listener "https" {
+        address "0.0.0.0:443"
+        protocol "https"
+        tls {
+            cert "/etc/sentinel/certs/wildcard.crt"
+            key "/etc/sentinel/certs/wildcard.key"
+        }
+    }
+}
+
+routes {
+    route "jellyfin" {
+        matches { host "jellyfin.home.lan" }
+        upstream "jellyfin"
+    }
+
+    route "nextcloud" {
+        matches { host "cloud.home.lan" }
+        upstream "nextcloud"
+    }
+
+    route "homeassistant" {
+        matches { host "ha.home.lan" }
+        upstream "homeassistant"
+    }
+
+    route "grafana" {
+        matches { host "grafana.home.lan" }
+        upstream "grafana"
+    }
+}
+
+upstreams {
+    upstream "jellyfin" { target "192.168.1.10:8096" }
+    upstream "nextcloud" { target "192.168.1.11:80" }
+    upstream "homeassistant" { target "192.168.1.12:8123" }
+    upstream "grafana" { target "192.168.1.13:3000" }
+}
+```
+
+**Benefits:**
+- Single entry point for all your services
+- TLS termination with your own certs or Let's Encrypt
+- Low memory footprint (~50MB) - runs great on a Raspberry Pi
+- Simple config - no complex YAML or templating
+
 ## Choosing the Right Agents
 
 | Use Case | Recommended Agents |
 |----------|-------------------|
-| Homelab | (none needed - just routing) |
-| Web Application | waf, denylist |
+| Load Balancing | (none needed - just routing) |
 | API Protection | auth, ratelimit, waf |
+| Web Application | waf, denylist |
 | AI/LLM APIs | ai-gateway, ratelimit |
 | Microservices | auth, ratelimit |
 | Custom Logic | js, lua, wasm |
 | Full OWASP CRS | modsec |
+| Homelab | (none needed - just routing) |
 
 ## What's Next?
 
