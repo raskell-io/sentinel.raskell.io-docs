@@ -33,11 +33,12 @@ package sentinel.agent.v1;
 
 enum EventType {
   EVENT_TYPE_UNSPECIFIED = 0;
-  EVENT_TYPE_REQUEST_HEADERS = 1;
-  EVENT_TYPE_REQUEST_BODY_CHUNK = 2;
-  EVENT_TYPE_RESPONSE_HEADERS = 3;
-  EVENT_TYPE_RESPONSE_BODY_CHUNK = 4;
-  EVENT_TYPE_REQUEST_COMPLETE = 5;
+  EVENT_TYPE_CONFIGURE = 1;           // Agent configuration
+  EVENT_TYPE_REQUEST_HEADERS = 2;
+  EVENT_TYPE_REQUEST_BODY_CHUNK = 3;
+  EVENT_TYPE_RESPONSE_HEADERS = 4;
+  EVENT_TYPE_RESPONSE_BODY_CHUNK = 5;
+  EVENT_TYPE_REQUEST_COMPLETE = 6;
 }
 
 // ============================================================================
@@ -61,6 +62,12 @@ message RequestMetadata {
 // ============================================================================
 // Event Messages
 // ============================================================================
+
+// Sent once when agent connects, before any request events
+message ConfigureEvent {
+  string agent_id = 1;            // Agent identifier from config
+  string config_json = 2;         // Configuration as JSON string
+}
 
 // Header values (supports multiple values per header name)
 message HeaderValues {
@@ -180,6 +187,7 @@ message AgentRequest {
   EventType event_type = 2;
 
   oneof event {
+    ConfigureEvent configure = 9;
     RequestHeadersEvent request_headers = 10;
     RequestBodyChunkEvent request_body_chunk = 11;
     ResponseHeadersEvent response_headers = 12;
@@ -238,6 +246,7 @@ For Unix socket transport, messages use JSON with the following schema:
     "event_type": {
       "type": "string",
       "enum": [
+        "configure",
         "request_headers",
         "request_body_chunk",
         "response_headers",
@@ -254,6 +263,20 @@ For Unix socket transport, messages use JSON with the following schema:
 ```
 
 ### Event Payloads
+
+**ConfigureEvent:**
+
+```json
+{
+  "agent_id": "waf-agent",
+  "config": {
+    "paranoia-level": 2,
+    "sqli": true,
+    "xss": true,
+    "exclude-paths": ["/health", "/metrics"]
+  }
+}
+```
 
 **RequestHeadersEvent:**
 

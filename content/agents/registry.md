@@ -27,8 +27,13 @@ Feature-complete but APIs may change.
 
 | Agent | Version | Description | Events |
 |-------|---------|-------------|--------|
+| **AI Gateway** | v0.1.0 | LLM traffic control with prompt injection detection, PII filtering, and rate limiting | `request_headers`, `request_body` |
+| **JS Scripting** | v0.1.0 | JavaScript-based custom logic using embedded V8 runtime | all |
 | **Lua Scripting** | v0.1.0 | Embed custom Lua scripts for flexible request/response processing | all |
-| **WAF** | v0.1.0 | OWASP CRS-compatible web application firewall with SQL injection, XSS detection | `request_headers`, `request_body` |
+| **ModSecurity** | v0.1.0 | Full OWASP CRS support via libmodsecurity integration | `request_headers`, `request_body` |
+| **WAF** | v0.1.0 | Native Rust web application firewall with SQL injection, XSS detection | `request_headers`, `request_body` |
+| **WASM** | v0.1.0 | WebAssembly-based custom logic with sandboxed execution | `request_headers` |
+| **WebSocket Inspector** | v0.1.0 | Deep inspection and filtering of WebSocket frames | `websocket_frame` |
 
 ### Planned
 
@@ -37,13 +42,11 @@ On the roadmap for future development.
 | Agent | Description |
 |-------|-------------|
 | **Adaptive Shield** | Self-learning threat detection using edge ML |
-| **AI Gateway** | LLM traffic control with cost management and semantic caching |
 | **Geo Filter** | Geographic IP-based request filtering |
 | **LLM Guardian** | AI-powered threat analysis for intelligent traffic decisions |
 | **Request Hold** | Pause suspicious requests for async verification |
 | **Response Cache** | High-performance caching with TTL controls |
 | **Telemetry** | Observability agent for analytics and logging |
-| **WebSocket Inspector** | Deep inspection of WebSocket connections |
 
 ## Built-in Reference Agents
 

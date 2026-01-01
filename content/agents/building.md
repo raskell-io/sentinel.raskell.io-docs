@@ -66,7 +66,7 @@ The core of every agent is the `AgentHandler` trait:
 use async_trait::async_trait;
 use sentinel_agent_protocol::{
     AgentHandler, AgentResponse, AuditMetadata, HeaderOp,
-    RequestHeadersEvent, RequestBodyChunkEvent,
+    ConfigureEvent, RequestHeadersEvent, RequestBodyChunkEvent,
     ResponseHeadersEvent, ResponseBodyChunkEvent,
     RequestCompleteEvent,
 };
@@ -77,6 +77,12 @@ pub struct MyAgent {
 
 #[async_trait]
 impl AgentHandler for MyAgent {
+    /// Called once when agent connects (optional)
+    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
+        // Handle configuration from KDL config block
+        AgentResponse::default_allow()
+    }
+
     /// Called when request headers are received
     async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
         // Your logic here
@@ -289,6 +295,99 @@ async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse 
     AgentResponse::default_allow()
 }
 ```
+
+### Handling Configuration
+
+Implement `on_configure()` to receive configuration from the proxy's KDL config:
+
+```rust
+use std::sync::RwLock;
+use serde::{Deserialize, Serialize};
+
+// Define your config struct with kebab-case for KDL compatibility
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct MyAgentConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub threshold: Option<u32>,
+    #[serde(default)]
+    pub allowed_paths: Vec<String>,
+}
+
+pub struct MyAgent {
+    config: RwLock<MyAgentConfig>,
+}
+
+impl MyAgent {
+    pub fn new() -> Self {
+        Self {
+            config: RwLock::new(MyAgentConfig::default()),
+        }
+    }
+}
+
+#[async_trait]
+impl AgentHandler for MyAgent {
+    async fn on_configure(&self, event: ConfigureEvent) -> AgentResponse {
+        // Parse the JSON config into your struct
+        match serde_json::from_value::<MyAgentConfig>(event.config) {
+            Ok(new_config) => {
+                // Update the agent's configuration
+                if let Ok(mut config) = self.config.write() {
+                    *config = new_config;
+                    tracing::info!("Agent configured successfully");
+                }
+                AgentResponse::default_allow()
+            }
+            Err(e) => {
+                tracing::error!("Invalid configuration: {}", e);
+                // Reject invalid config - proxy won't route to this agent
+                AgentResponse::block(500, Some(format!("Invalid config: {}", e)))
+            }
+        }
+    }
+
+    async fn on_request_headers(&self, event: RequestHeadersEvent) -> AgentResponse {
+        // Read the current config
+        let config = self.config.read().unwrap();
+
+        if !config.enabled {
+            return AgentResponse::default_allow();
+        }
+
+        // Use config values in your logic
+        if config.allowed_paths.iter().any(|p| event.uri.starts_with(p)) {
+            return AgentResponse::default_allow();
+        }
+
+        // ... rest of your logic
+        AgentResponse::default_allow()
+    }
+}
+```
+
+The corresponding KDL configuration:
+
+```kdl
+agent "my-agent" type="custom" {
+    unix-socket "/tmp/my-agent.sock"
+    events "request_headers"
+    config {
+        enabled true
+        threshold 100
+        allowed-paths "/health" "/metrics" "/api/public"
+    }
+}
+```
+
+**Key points:**
+
+- Use `#[serde(rename_all = "kebab-case")]` to match KDL naming conventions
+- Use `#[serde(default)]` for optional fields with defaults
+- Wrap mutable config in `RwLock` for thread-safe updates
+- Return a block decision to reject invalid configurations
+- CLI args can serve as fallback when no config block is present
 
 ## Running the Agent
 

@@ -9,6 +9,7 @@ Agents receive events at key points in the request/response lifecycle. Each even
 
 | Event | Phase | Can Block | Can Mutate | Use Cases |
 |-------|-------|-----------|------------|-----------|
+| `configure` | Startup | Yes | None | Agent configuration |
 | `request_headers` | Request | Yes | Request headers | Auth, routing, early blocking |
 | `request_body` | Request | Yes | Request headers | WAF inspection, content validation |
 | `response_headers` | Response | No | Response headers | Header injection, caching hints |
@@ -44,6 +45,98 @@ Agents receive events at key points in the request/response lifecycle. Each even
 │                                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+## Configure Event
+
+**Event Type:** `configure`
+
+Sent once when the agent connects to the proxy, before any request events. This allows agents to receive configuration from the KDL config file instead of relying solely on CLI arguments.
+
+### Payload
+
+```rust
+struct ConfigureEvent {
+    agent_id: String,           // Agent identifier from config
+    config: serde_json::Value,  // Configuration as JSON object
+}
+```
+
+### Configuration Source
+
+The configuration comes from the `config` block in KDL:
+
+```kdl
+agent "waf" type="waf" {
+    unix-socket "/var/run/sentinel/waf.sock"
+    events "request_headers" "request_body"
+    config {
+        paranoia-level 2
+        sqli true
+        xss true
+        exclude-paths "/health" "/metrics"
+    }
+}
+```
+
+This becomes:
+
+```json
+{
+  "agent_id": "waf",
+  "config": {
+    "paranoia-level": 2,
+    "sqli": true,
+    "xss": true,
+    "exclude-paths": ["/health", "/metrics"]
+  }
+}
+```
+
+### Use Cases
+
+- **Dynamic Configuration:** Apply settings without restarting the agent
+- **Centralized Config:** Keep all configuration in one KDL file
+- **Environment-Specific Settings:** Different configs for dev/staging/prod
+
+### Example Response
+
+```json
+{
+  "version": 1,
+  "decision": {"allow": {}},
+  "audit": {
+    "tags": ["configured"],
+    "custom": {"paranoia_level": "2"}
+  }
+}
+```
+
+### Rejecting Configuration
+
+If the configuration is invalid, the agent can reject it:
+
+```json
+{
+  "version": 1,
+  "decision": {
+    "block": {
+      "status": 500,
+      "body": "Invalid config: paranoia-level must be 1-4"
+    }
+  }
+}
+```
+
+When configuration is rejected, the proxy will not start routing traffic to that agent.
+
+### KDL to JSON Conversion
+
+| KDL | JSON |
+|-----|------|
+| `paranoia-level 2` | `{"paranoia-level": 2}` |
+| `sqli true` | `{"sqli": true}` |
+| `paths "/a" "/b"` | `{"paths": ["/a", "/b"]}` |
+| `nested { key "val" }` | `{"nested": {"key": "val"}}` |
 
 ## Request Headers Event
 
