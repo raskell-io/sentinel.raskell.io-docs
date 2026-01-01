@@ -10,7 +10,7 @@ generate_feeds = false
 [markdown]
 highlight_code = true
 highlight_theme = "css"
-extra_syntaxes_and_themes = []
+extra_syntaxes_and_themes = ["syntaxes"]
 smart_punctuation = true
 
 [slugify]
