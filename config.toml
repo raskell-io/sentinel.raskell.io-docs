@@ -35,6 +35,6 @@ show_theme_toggle = true
 [extra.versions]
 current = "26.01"
 list = [
-    { version = "26.01", url = "/", label = "latest" },
-    { version = "25.12", url = "/v/25.12/", label = "" },
+    { version = "26.01", url = "/docs/", label = "latest" },
+    { version = "25.12", url = "/docs/v/25.12/", label = "" },
 ]
