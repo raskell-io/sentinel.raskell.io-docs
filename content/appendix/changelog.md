@@ -13,6 +13,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### [Unreleased]
 
 #### Added
+- **API Schema Validation**
+  - JSON Schema validation for API routes (requests and responses)
+  - OpenAPI 3.0 and Swagger 2.0 specification support
+  - Inline JSON Schema definitions in KDL configuration
+  - Strict mode to reject additional properties
+  - Structured validation error responses with field-level details
+  - Support for complex nested schemas and arrays
+  - JSON Schema Draft 7 features (types, formats, patterns, etc.)
 - WebSocket frame inspection support in agent protocol
 - Graceful shutdown improvements
 - Connection draining during rolling updates
@@ -20,6 +28,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 #### Changed
 - Improved upstream health check reliability
 - Reduced memory usage for idle connections
+
+#### Security
+- Removed archived agents with unsafe FFI code (Lua, WAF, auth, denylist, ratelimit)
+- Replaced `unreachable!()` panics with proper error handling in agent-protocol
+- Added `WrongConnectionType` error variant for better error handling
+- Improved error handling in agent connection management
 
 ---
 

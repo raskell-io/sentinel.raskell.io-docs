@@ -13,6 +13,7 @@ Complete, production-ready configuration examples for common Sentinel use cases.
 |---------|----------|--------------|
 | [Simple Proxy](simple-proxy/) | Basic reverse proxy | Single upstream, health checks |
 | [API Gateway](api-gateway/) | API management | Versioning, auth, rate limiting |
+| [API Validation](api-validation/) | Schema validation | OpenAPI specs, JSON Schema, contract enforcement |
 | [Load Balancer](load-balancer/) | Traffic distribution | Multiple backends, algorithms |
 | [Static Site](static-site/) | File serving | Caching, compression, SPA |
 | [Microservices](microservices/) | Service mesh | Multi-service routing |

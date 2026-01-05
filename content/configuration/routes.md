@@ -183,6 +183,366 @@ route "health" {
 | `config` | `/admin/config` | Configuration dump (admin) |
 | `upstreams` | `/admin/upstreams` | Upstream health status (admin) |
 
+#### API Schema Validation
+
+The `api` service type supports JSON Schema validation for requests and responses. This enables contract validation at the proxy layer using OpenAPI/Swagger specifications or inline JSON schemas.
+
+##### OpenAPI/Swagger File Reference
+
+Reference an OpenAPI 3.0 or Swagger 2.0 specification (YAML or JSON):
+
+```kdl
+route "api-v1" {
+    matches {
+        path-prefix "/api/v1"
+    }
+    upstream "api-backend"
+    service-type "api"
+    api-schema {
+        schema-file "/etc/sentinel/schemas/api-v1-openapi.yaml"
+        validate-requests #true
+        validate-responses #false
+        strict-mode #false
+    }
+}
+```
+
+The schema file is loaded at startup and used to validate requests against the paths, methods, and schemas defined in the OpenAPI specification.
+
+##### Inline JSON Schema
+
+Define JSON schemas directly in the configuration using KDL syntax:
+
+```kdl
+route "user-registration" {
+    matches {
+        path "/api/register"
+    }
+    upstream "api-backend"
+    service-type "api"
+    api-schema {
+        validate-requests #true
+        request-schema {
+            type "object"
+            properties {
+                email {
+                    type "string"
+                    format "email"
+                    description "User email address"
+                }
+                password {
+                    type "string"
+                    minLength 8
+                    maxLength 128
+                    description "Password (min 8 characters)"
+                }
+                username {
+                    type "string"
+                    minLength 3
+                    maxLength 32
+                    pattern "^[a-zA-Z0-9_-]+$"
+                }
+                age {
+                    type "integer"
+                    minimum 13
+                    maximum 120
+                }
+                terms_accepted {
+                    type "boolean"
+                }
+            }
+            required "email" "password" "username" "terms_accepted"
+        }
+    }
+}
+```
+
+The inline schema is converted to JSON Schema and compiled at startup. It follows the JSON Schema specification and supports all standard JSON Schema keywords.
+
+##### Request and Response Validation
+
+Configure separate validation for requests and responses:
+
+```kdl
+route "user-profile" {
+    matches {
+        path-prefix "/api/profile"
+    }
+    upstream "api-backend"
+    service-type "api"
+    api-schema {
+        validate-requests #true
+        validate-responses #true  // Enable response validation
+        strict-mode #true          // Reject additional properties
+
+        // Schema for profile updates
+        request-schema {
+            type "object"
+            properties {
+                display_name {
+                    type "string"
+                    minLength 1
+                    maxLength 100
+                }
+                bio {
+                    type "string"
+                    maxLength 500
+                }
+                avatar_url {
+                    type "string"
+                    format "uri"
+                }
+            }
+            minProperties 1  // At least one field required
+        }
+
+        // Schema for profile responses
+        response-schema {
+            type "object"
+            properties {
+                id {
+                    type "string"
+                    format "uuid"
+                }
+                email {
+                    type "string"
+                    format "email"
+                }
+                username { type "string" }
+                display_name { type "string" }
+                bio { type "string" }
+                avatar_url {
+                    type "string"
+                    format "uri"
+                }
+                created_at {
+                    type "string"
+                    format "date-time"
+                }
+                updated_at {
+                    type "string"
+                    format "date-time"
+                }
+            }
+            required "id" "email" "username" "created_at"
+        }
+    }
+}
+```
+
+##### Complex Nested Schemas
+
+Support for complex object hierarchies and arrays:
+
+```kdl
+route "create-order" {
+    matches {
+        path "/api/orders"
+        method "POST"
+    }
+    upstream "api-backend"
+    service-type "api"
+    api-schema {
+        validate-requests #true
+        strict-mode #true
+        request-schema {
+            type "object"
+            properties {
+                customer {
+                    type "object"
+                    properties {
+                        name {
+                            type "string"
+                            minLength 1
+                        }
+                        email {
+                            type "string"
+                            format "email"
+                        }
+                        phone {
+                            type "string"
+                            pattern "^\\+?[1-9]\\d{1,14}$"
+                        }
+                    }
+                    required "name" "email"
+                }
+                items {
+                    type "array"
+                    minItems 1
+                    items {
+                        type "object"
+                        properties {
+                            product_id { type "string" }
+                            quantity {
+                                type "integer"
+                                minimum 1
+                            }
+                            price {
+                                type "number"
+                                minimum 0
+                            }
+                        }
+                        required "product_id" "quantity" "price"
+                    }
+                }
+                shipping_address {
+                    type "object"
+                    properties {
+                        street { type "string" }
+                        city { type "string" }
+                        state {
+                            type "string"
+                            minLength 2
+                            maxLength 2
+                        }
+                        zip {
+                            type "string"
+                            pattern "^\\d{5}(-\\d{4})?$"
+                        }
+                        country {
+                            type "string"
+                            enum "US" "CA" "MX"
+                        }
+                    }
+                    required "street" "city" "state" "zip" "country"
+                }
+            }
+            required "customer" "items" "shipping_address"
+        }
+    }
+}
+```
+
+##### Validation Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `schema-file` | None | Path to OpenAPI/Swagger spec file (YAML or JSON) |
+| `request-schema` | None | Inline JSON Schema for request validation |
+| `response-schema` | None | Inline JSON Schema for response validation |
+| `validate-requests` | `true` | Enable request body validation |
+| `validate-responses` | `false` | Enable response body validation |
+| `strict-mode` | `false` | Reject additional properties not in schema |
+
+##### Validation Error Responses
+
+When validation fails, Sentinel returns a structured JSON error response:
+
+```json
+{
+  "error": "Validation failed",
+  "status": 400,
+  "request_id": "req-123",
+  "validation_errors": [
+    {
+      "field": "$.email",
+      "message": "'not-an-email' is not a valid email",
+      "value": "not-an-email"
+    },
+    {
+      "field": "$.password",
+      "message": "String is too short (expected minimum 8 characters)",
+      "value": "short"
+    }
+  ]
+}
+```
+
+##### JSON Schema Support
+
+Sentinel supports JSON Schema Draft 7 with the following features:
+
+- **Types**: `string`, `number`, `integer`, `boolean`, `array`, `object`, `null`
+- **String validation**: `minLength`, `maxLength`, `pattern`, `format` (email, uri, uuid, date-time, etc.)
+- **Numeric validation**: `minimum`, `maximum`, `multipleOf`
+- **Array validation**: `minItems`, `maxItems`, `uniqueItems`, `items`
+- **Object validation**: `properties`, `required`, `minProperties`, `maxProperties`, `additionalProperties`
+- **Logical operators**: `allOf`, `anyOf`, `oneOf`, `not`
+- **References**: `$ref` (for OpenAPI specs)
+
+##### OpenAPI Integration
+
+When using `schema-file`, Sentinel:
+
+1. Loads the OpenAPI/Swagger specification at startup
+2. Extracts schemas for each path and HTTP method
+3. Validates incoming requests against the operation's `requestBody` schema
+4. Validates responses against the operation's `responses` schema (if enabled)
+5. Matches requests to operations by path and method
+
+The schema file is monitored for changes and automatically reloaded (if hot-reload is enabled).
+
+##### Performance Considerations
+
+- Schemas are compiled once at startup for maximum performance
+- Request validation adds minimal latency (typically <1ms)
+- Response validation requires buffering the full response body
+- Use `validate-responses` only in development/testing environments
+- For high-throughput APIs, consider validating only critical endpoints
+
+##### Best Practices
+
+1. **Use OpenAPI specs** for complex APIs with multiple endpoints
+2. **Enable strict-mode** to catch unexpected fields early
+3. **Validate requests in production**, responses in development
+4. **Keep schemas focused** - validate only what's necessary
+5. **Use meaningful descriptions** for better error messages
+6. **Test validation** with invalid payloads before deploying
+7. **Version your schemas** alongside your API versions
+
+##### Example: Complete API Route
+
+```kdl
+route "user-api" {
+    priority 200
+    matches {
+        path-prefix "/api/v2/users"
+        method "GET" "POST" "PUT" "DELETE"
+    }
+    upstream "user-service"
+    service-type "api"
+
+    // Schema validation
+    api-schema {
+        schema-file "/etc/sentinel/schemas/user-api-v2.yaml"
+        validate-requests #true
+        validate-responses #false
+        strict-mode #true
+    }
+
+    // Authentication and rate limiting
+    filters "jwt-auth" "rate-limit"
+
+    // Error handling
+    error-pages {
+        default-format "json"
+        pages {
+            "400" {
+                format "json"
+                message "Invalid request"
+            }
+            "401" {
+                format "json"
+                message "Authentication required"
+            }
+        }
+    }
+
+    // Performance tuning
+    policies {
+        timeout-secs 30
+        max-body-size "10MB"
+        buffer-requests #true  // Required for validation
+    }
+
+    // Resilience
+    retry-policy {
+        max-attempts 3
+        retryable-status-codes 502 503 504
+    }
+}
+```
+
 ### Upstream Reference
 
 ```kdl
